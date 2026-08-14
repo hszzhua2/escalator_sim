@@ -1,0 +1,2055 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClinicFlow 3D - 空间效能与客流仿真系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js & Controls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+    <!-- ECharts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <!-- JSZip & FileSaver -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    
+    <script>
+        tailwind.config = { darkMode: 'class' };
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f8fafc; color: #334155; font-family: sans-serif; user-select: none; transition: background-color 0.3s; }
+        .dark body { background-color: #0f172a; color: #e2e8f0; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; }
+        
+        .panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(0,0,0,0.1); transition: background 0.3s; }
+        .dark .panel { background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255,255,255,0.1); }
+        
+        .btn { background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: #3b82f6; cursor: pointer; transition: all 0.2s; }
+        .dark .btn { background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); color: #93c5fd; }
+        .btn:hover { background: rgba(59, 130, 246, 0.2); }
+        .dark .btn:hover { background: rgba(59, 130, 246, 0.4); }
+        .btn.active { background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.6); color: #10b981; }
+        .dark .btn.active { background: rgba(16, 185, 129, 0.4); border-color: rgba(16, 185, 129, 0.8); color: #6ee7b7; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        .chart-box { width: 100%; height: 220px; }
+        .trend-box { width: 100%; height: 120px; margin-top: 8px; }
+        
+        #measurements-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        .measure-label { position: absolute; background: rgba(255,255,255,0.8); color: #000; padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #3b82f6; transform: translate(-50%, -50%); white-space: nowrap; }
+        .dark .measure-label { background: rgba(0,0,0,0.7); color: #fff; }
+
+        #scale-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); pointer-events: none; display: flex; flex-direction: column; align-items: center; z-index: 10; }
+        #scale-bar-line { width: 100px; height: 8px; border-left: 1px solid #475569; border-right: 1px solid #475569; border-bottom: 1px solid #475569; }
+        .dark #scale-bar-line { border-color: #cbd5e1; }
+        #scale-bar-text { font-size: 11px; font-family: monospace; color: #475569; margin-bottom: 2px; }
+        .dark #scale-bar-text { color: #cbd5e1; text-shadow: 1px 1px 2px #000; }
+
+        .tab-btn { padding: 8px 16px; border-bottom: 2px solid transparent; font-weight: 600; transition: all 0.2s; cursor: pointer; color: #64748b;}
+        .dark .tab-btn { color: #94a3b8; }
+        .tab-btn.active { border-bottom: 2px solid #38bdf8; color: #0ea5e9; }
+        .dark .tab-btn.active { color: #38bdf8; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .gauge-card { background: rgba(241, 245, 249, 0.8); border-radius: 12px; padding: 16px; border: 1px solid rgba(0,0,0,0.05); }
+        .dark .gauge-card { background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); }
+        .metric-badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: bold; }
+        
+        #curveEditor { cursor: crosshair; }
+        
+        /* 框选UI */
+        .selection-box { position: absolute; border: 1px solid #3b82f6; background: rgba(59,130,246,0.15); pointer-events: none; z-index: 100; display: none; }
+        
+        /* 直梯弹窗 */
+        #elevModal { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .dark #elevModal { background: #1e293b; color: white; border: 1px solid #475569; }
+        #modalOverlay { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.4); z-index: 999; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="measurements-layer"></div>
+    <div id="selection-box" class="selection-box"></div>
+
+    <div id="modalOverlay"></div>
+    <div id="elevModal">
+        <h2 class="text-sm font-bold mb-4 border-b border-slate-200 dark:border-slate-600 pb-2">定义直梯运行参数</h2>
+        <div class="grid grid-cols-2 gap-4 text-xs mb-4">
+            <div><label class="block mb-1 text-slate-500">起始楼层 (下界)</label><select id="elevMin" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded p-1"></select></div>
+            <div><label class="block mb-1 text-slate-500">结束楼层 (上界)</label><select id="elevMax" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded p-1"></select></div>
+            <div><label class="block mb-1 text-slate-500">满载客量 (人)</label><input type="number" id="elevCap" value="15" min="1" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded p-1"></div>
+            <div><label class="block mb-1 text-slate-500">运行线速度 (m/s)</label><input type="number" id="elevSpd" value="2.0" step="0.1" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded p-1"></div>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button onclick="closeElevModal()" class="px-3 py-1 rounded text-xs bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-gray-300">取消</button>
+            <button onclick="confirmElevModal()" class="px-3 py-1 rounded text-xs bg-blue-500 text-white">确认进入摆放模式</button>
+        </div>
+    </div>
+
+    <div id="scale-bar">
+        <div id="scale-bar-text">-- m</div>
+        <div id="scale-bar-line"></div>
+    </div>
+
+    <div id="ui-layer">
+        <div class="panel pointer-events-auto m-4 p-3 flex justify-between items-center rounded-lg shadow-lg">
+            <div class="flex items-center gap-4">
+                <div class="text-lg font-bold text-blue-600 dark:text-blue-400 cursor-pointer flex items-center gap-2 group" onclick="renameProject()">
+                    <span id="projectTitle">未命名方案</span>
+                    <span class="text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">✎</span>
+                </div>
+                <div class="flex gap-2 border-l border-slate-300 dark:border-gray-600 pl-4">
+                    <button onclick="document.getElementById('importInput').click()" class="btn px-2 py-1 rounded text-[10px]">导入</button>
+                    <input type="file" id="importInput" accept=".zip" class="hidden" onchange="importProject(event)">
+                    <button onclick="exportProject()" id="btnExport" class="btn px-2 py-1 rounded text-[10px]">导出</button>
+                </div>
+                <div class="text-xs text-slate-500 dark:text-gray-400 border-l border-slate-300 dark:border-gray-600 pl-4">仿真时钟: <span id="clock" class="font-mono text-slate-800 dark:text-white text-sm">2026-06-04 07:00:00</span></div>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="toggleTheme()" class="btn px-2 py-1.5 rounded text-xs" title="切换深色/浅色模式">🌓</button>
+                
+                <div class="flex flex-col ml-2">
+                    <label class="text-[10px] text-slate-600 dark:text-gray-300 mb-1">加速比:</label>
+                    <div class="flex items-center gap-1">
+                        <input type="number" id="inputSpeed" value="60" min="1" class="w-12 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1 py-0.5 text-xs h-6">
+                        <button onclick="updateSimSpeed()" class="btn px-2 py-0.5 rounded text-[10px] h-6">确定</button>
+                    </div>
+                </div>
+                
+                <div class="flex gap-1 ml-2">
+                    <button id="btnPlayPause" onclick="toggleSim()" class="btn px-3 py-1.5 rounded text-xs font-bold w-16">▶ 开始</button>
+                    <button id="btnReset" onclick="resetSim()" class="bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/20 px-3 py-1.5 rounded text-xs font-bold">重置</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-1 overflow-hidden">
+            <div class="panel pointer-events-auto m-4 mt-0 w-[320px] rounded-lg flex flex-col p-4 shadow-lg overflow-y-auto">
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">客流到达负荷模型</h3>
+                <div class="flex flex-col gap-2 text-xs mb-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-blue-600 dark:text-blue-400">时段总门诊量 (人)</span>
+                        <input type="number" id="inputTotalPeople" value="9000" step="100" min="0" onchange="updateCurveData()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-orange-600 dark:text-orange-400">集中到达概率</span>
+                        <input type="number" id="bulkProb" value="0.05" step="0.01" max="1" min="0" onchange="updateAgentConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                    <div class="text-[9px] text-slate-400">分时段客流到达权重系数 (7:00-12:00)</div>
+                    <canvas id="curveEditor" width="280" height="80" class="bg-slate-200 dark:bg-slate-700 rounded border border-slate-300 dark:border-slate-600"></canvas>
+                </div>
+
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">人员微观动力学参数</h3>
+                <div class="flex flex-col gap-2 text-xs mb-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-emerald-600 dark:text-green-400">健全人群步速 (m/s)</span>
+                        <input type="number" id="speedAdult" value="1.2" step="0.1" onchange="updateAgentConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-red-600 dark:text-red-400">迟缓人群步速 (m/s)</span>
+                        <input type="number" id="speedPatient" value="0.6" step="0.1" onchange="updateAgentConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-600 dark:text-gray-300">行动迟缓人群占比</span>
+                        <input type="number" id="ratioPatient" value="0.2" step="0.05" max="1" min="0" onchange="updateAgentConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                </div>
+
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">客流去向目标权重 (B2 - 9F)</h3>
+                <div class="grid grid-cols-4 gap-1 text-[10px] mb-4 text-center" id="weightsGrid"></div>
+
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1 flex justify-between items-center">
+                    <span>拓扑构建与交互</span>
+                    <span class="text-[9px] font-normal text-slate-400" title="Shift+拖拽:框选&#10;Delete:删除&#10;Ctrl+C:复制&#10;T/R/S:移动/旋转/缩放&#10;Esc:取消">⌨️快捷键</span>
+                </h3>
+                <div class="grid grid-cols-3 gap-2 mb-2">
+                    <button onclick="setMode('SELECT')" id="mode_SELECT" class="btn active py-1.5 rounded text-xs col-span-1">点选(Sel)</button>
+                    <button onclick="setMode('WALL')" id="mode_WALL" class="btn py-1.5 rounded text-xs col-span-1">实体墙面</button>
+                    <button onclick="setMode('MEASURE')" id="mode_MEASURE" class="btn py-1.5 rounded text-xs col-span-1">测量</button>
+                    <button onclick="setMode('ESCALATOR')" id="mode_ESCALATOR" class="btn py-1.5 rounded text-xs col-span-1">置入剪刀梯</button>
+                    <button onclick="openElevModal()" id="mode_ELEVATOR" class="btn py-1.5 rounded text-xs col-span-2 text-indigo-500 dark:text-indigo-400 border-indigo-400 dark:border-indigo-500/50 font-bold">+ 垂直直梯</button>
+                    <button onclick="setMode('SPAWN')" id="mode_SPAWN" class="btn py-1.5 rounded text-xs col-span-3 text-pink-500 dark:text-pink-400 border-pink-400 dark:border-pink-500/50">定义出发区域(Spawn)</button>
+                </div>
+
+                <div class="flex gap-2 mb-4 bg-slate-100 dark:bg-slate-800 p-1 rounded border border-slate-300 dark:border-slate-700 justify-center">
+                    <button onclick="setTransformMode('translate')" class="btn text-[10px] px-2 py-1 rounded">移动(T)</button>
+                    <button onclick="setTransformMode('rotate')" class="btn text-[10px] px-2 py-1 rounded">旋转(R)</button>
+                    <button onclick="setTransformMode('scale')" class="btn text-[10px] px-2 py-1 rounded">缩放(S)</button>
+                </div>
+
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">垂直设备运行参数</h3>
+                <div class="flex flex-col gap-2 text-xs mb-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-blue-600 dark:text-blue-400">扶梯水平分量 $V_h$</span>
+                        <input type="number" id="escSpeedH" value="0.5" step="0.1" onchange="updateEscConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-blue-600 dark:text-blue-400">扶梯垂直分量 $V_v$</span>
+                        <input type="number" id="escSpeedV" value="0.25" step="0.1" onchange="updateEscConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-indigo-600 dark:text-indigo-400">直梯偏好概率 $P_{elev}$</span>
+                        <input type="number" id="elevPref" value="0.5" step="0.1" max="1" min="0" onchange="updateAgentConfig()" class="w-16 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1">
+                    </div>
+                </div>
+
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">图层显示过滤</h3>
+                <div id="floorToggles" class="grid grid-cols-2 gap-1 mb-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-1 rounded"></div>
+
+                <h3 class="text-xs font-bold text-slate-500 dark:text-gray-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">环境底图与密度图层</h3>
+                <input type="file" id="bgInput" accept="image/*" class="text-xs w-full mb-2 bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600" onchange="uploadBg(event)">
+                <div class="flex flex-col gap-2 text-xs mb-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-600 dark:text-gray-300">底图透明度</span>
+                        <input type="range" id="bgOpacity" min="0" max="100" value="50" oninput="updateBg()" class="w-32">
+                    </div>
+                    <label class="flex items-center gap-2 text-slate-600 dark:text-gray-300">
+                        <input type="checkbox" id="bgLock" class="accent-blue-500" onchange="state.bgLocked = this.checked">
+                        锁定底图位置
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-600 dark:text-gray-300">
+                        <input type="checkbox" id="toggleHeatmap" checked class="accent-red-500" onchange="state.showHeatmap = this.checked; updateHeatmaps();">
+                        显示驻留密度热力图
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex-1"></div>
+
+            <div class="panel pointer-events-auto m-4 mt-0 w-[420px] rounded-lg flex flex-col p-4 shadow-lg overflow-y-auto">
+                <div class="flex border-b border-slate-300 dark:border-gray-700 mb-4">
+                    <div class="tab-btn active text-xs" onclick="switchTab('monitor', event)">系统级运行状态监控</div>
+                    <div class="tab-btn text-xs" onclick="switchTab('escalator-metrics', event)">运载设备效能评价</div>
+                </div>
+
+                <!-- 监控面板 -->
+                <div id="tab-monitor" class="tab-content active">
+                    <h3 class="text-xs font-bold text-blue-600 dark:text-blue-400 mb-2 border-b border-slate-300 dark:border-gray-700 pb-1">宏观运力统计概览</h3>
+                    <div class="grid grid-cols-2 gap-2 mb-4 text-xs">
+                        <div class="bg-slate-100 dark:bg-slate-800 p-2 rounded border border-slate-300 dark:border-slate-700">
+                            <div class="text-slate-500 dark:text-gray-500 text-[10px] font-bold">累计疏散人次 ($C_a$)</div>
+                            <div id="metricCa" class="text-lg font-mono text-green-600 dark:text-green-400">0</div>
+                        </div>
+                        <div class="bg-slate-100 dark:bg-slate-800 p-2 rounded border border-slate-300 dark:border-slate-700">
+                            <div class="text-slate-500 dark:text-gray-500 text-[10px] font-bold">瞬时等待人数 ($L_{total}$)</div>
+                            <div id="metricLmax" class="text-lg font-mono text-yellow-600 dark:text-yellow-400">0</div>
+                        </div>
+                        <div class="bg-slate-100 dark:bg-slate-800 p-2 rounded border border-slate-300 dark:border-slate-700">
+                            <div class="text-slate-500 dark:text-gray-500 text-[10px] font-bold">扶梯均候梯 ($W_{esc}$)</div>
+                            <div id="metricWqEsc" class="text-lg font-mono text-orange-600 dark:text-orange-400">0.0<span class="text-[10px]">s</span></div>
+                        </div>
+                        <div class="bg-slate-100 dark:bg-slate-800 p-2 rounded border border-slate-300 dark:border-slate-700">
+                            <div class="text-slate-500 dark:text-gray-500 text-[10px] font-bold">直梯均候梯 ($W_{el}$)</div>
+                            <div id="metricWqEl" class="text-lg font-mono text-indigo-600 dark:text-indigo-400">0.0<span class="text-[10px]">s</span></div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-[10px] text-slate-500 dark:text-gray-400 mb-1 font-bold border-t border-slate-200 dark:border-slate-700 pt-2">等候区滞留负荷时间序列</div>
+                    <div id="chartQueue" class="chart-box bg-slate-100 dark:bg-slate-800/50 rounded mb-4 border border-slate-300 dark:border-slate-700"></div>
+                    
+                    <div class="text-[10px] text-slate-500 dark:text-gray-400 mb-1 font-bold">全系统客流去向分布图</div>
+                    <div id="chartSankey" class="chart-box bg-slate-100 dark:bg-slate-800/50 rounded border border-slate-300 dark:border-slate-700"></div>
+                </div>
+
+                <!-- 扶梯效能评价 -->
+                <div id="tab-escalator-metrics" class="tab-content space-y-4">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="gauge-card">
+                            <div class="text-[11px] font-semibold text-cyan-700 dark:text-cyan-300 mb-1 flex justify-between">
+                                <span>扶梯利用率 $CE_5$</span><span id="esc-ce5-badge">--%</span>
+                            </div>
+                            <div id="chartEscCE5" class="w-full h-32"></div>
+                            <div id="chartEscCE5Trend" class="trend-box"></div>
+                        </div>
+                        <div class="gauge-card">
+                            <div class="text-[11px] font-semibold text-purple-700 dark:text-purple-300 mb-1 flex justify-between">
+                                <span>扶梯占有率 $\varepsilon$</span><span id="esc-eps-badge">--%</span>
+                            </div>
+                            <div id="chartEscEpsilon" class="w-full h-32"></div>
+                            <div id="chartEscEpsTrend" class="trend-box"></div>
+                        </div>
+                        <div class="gauge-card">
+                            <div class="text-[11px] font-semibold text-blue-700 dark:text-blue-300 mb-1 flex justify-between">
+                                <span>直梯利用率 $CE_5$</span><span id="el-ce5-badge">--%</span>
+                            </div>
+                            <div id="chartElCE5" class="w-full h-32"></div>
+                            <div id="chartElCE5Trend" class="trend-box"></div>
+                        </div>
+                        <div class="gauge-card">
+                            <div class="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1 flex justify-between">
+                                <span>直梯占有率 $\varepsilon$</span><span id="el-eps-badge">--%</span>
+                            </div>
+                            <div id="chartElEpsilon" class="w-full h-32"></div>
+                            <div id="chartElEpsTrend" class="trend-box"></div>
+                        </div>
+                    </div>
+                    <div class="text-[9px] text-slate-500 dark:text-gray-400 mt-2 leading-relaxed border-t border-slate-300 dark:border-slate-700 pt-2">
+                        * 注: 扶梯作为连续流设备，其 $CE_5$ 理论承载上限基准确切；但直梯作为批处理设备，其实际运能受静态基准估算（设定均值 100人/5min/台）及层级离散调度影响，存在标定偏差。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const BASE_DATE_STRING = '2026-06-04 ';
+function getSimDateTimeString(simTimeSecs) {
+    const h = Math.floor(simTimeSecs / 3600);
+    const m = Math.floor((simTimeSecs % 3600) / 60);
+    const s = Math.floor(simTimeSecs % 60);
+    const pad = (n) => n.toString().padStart(2, '0');
+    return `${BASE_DATE_STRING}${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+const CONFIG = {
+    M_TO_UNIT: 1,      
+    FLOOR_H: 5,        
+    FLOORS: ['B2', 'B1', '1F', '2F', '3F', '4F', '5F', '6F', '7F', '8F', '9F'],
+    SIM_START: 7 * 3600, 
+    SIM_END: 12 * 3600,  
+    GRID_SIZE: 100,    
+    MAX_AGENTS: 5000,
+    ESC_WIDTH: 1.0,
+    ESC_SPEED_H: 0.5,
+    ESC_SPEED_V: 0.25,
+    EPSILON_CAP: 1.0,
+    ESC_CAPACITY: 15,
+    QUEUE_SPACING: 0.6
+};
+
+const state = {
+    projectId: "proj_" + Date.now(),
+    projectName: "未命名方案",
+    mode: 'SELECT',
+    activeFloorIndex: 2,
+    escalators: [],
+    elevators: [],
+    walls: [],
+    spawnPoints: [],
+    selectedObjects: [],
+    pathCache: new Map(),
+    wallGrids: Array(CONFIG.FLOORS.length).fill(null).map(() => new Uint8Array(CONFIG.GRID_SIZE * CONFIG.GRID_SIZE)),
+    bgMesh: null,
+    bgDataUrl: null,
+    bgOpacity: 0.5,
+    bgLocked: false,
+    showHeatmap: true,
+    floorVisibility: Array(CONFIG.FLOORS.length).fill(true),
+    
+    agentConfig: { 
+        adultSpeed: 1.2, patientSpeed: 0.6, patientRatio: 0.2, bulkProb: 0.05, 
+        destWeights: [2, 8, 10, 20, 20, 10, 10, 5, 5, 5, 5],
+        elevPref: 0.5
+    },
+    
+    curveData: {
+        totalPeople: 9000,
+        weights: [0.1, 0.4, 0.8, 1.0, 0.5, 0.2], 
+        draggingIndex: -1
+    },
+
+    wallDraw: { active: false, p1: null, mesh: null },
+    measureDraw: { active: false, p1: null, line: null },
+    measurements: [],
+    elevPending: { active: false, fMin: 0, fMax: 10, cap: 15, spd: 2.0 },
+
+    sim: {
+        running: false, time: CONFIG.SIM_START, speed: 60,
+        arrivalAcc: 0, nextThreshold: -Math.log(1 - Math.random()),
+        agents: [], completed: 0, 
+        completedLog: [], completedElevLog: [], queueLog: [],
+        sankeyData: {},
+        metrics: { 
+            Lmax: 0, cycleWqMax: 0, inPeak: false, peakEndTime: null,
+            escWqSum: 0, escWqCount: 0, elevWqSum: 0, elevWqCount: 0
+        }
+    },
+
+    escMetrics: { ce5: 0, epsilon: 0, history: [] },
+    elevMetrics: { ce5: 0, epsilon: 0, history: [] }
+};
+CONFIG.FLOORS.forEach(f => state.sim.sankeyData[f] = 0);
+
+let scene, camera, renderer, controls, transformControl, raycaster, mouse;
+let floorMeshes = [], heatmaps = [], heatmapCtxs = [], heatmapTextures = [];
+let agentInstancedMesh, dummy;
+let charts = { 
+    queue: null, sankey: null, 
+    escCE5: null, escEps: null, escCE5Trend: null, escEpsTrend: null,
+    elCE5: null, elEps: null, elCE5Trend: null, elEpsTrend: null
+};
+
+// ---- 框选辅助变量 ----
+let isBoxSelecting = false;
+let selectStartPoint = {x: 0, y: 0};
+
+// ---- CURVE EDITOR ----
+function initCurveEditor() {
+    const cvs = document.getElementById('curveEditor');
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d');
+    
+    const w = cvs.width; const h = cvs.height;
+    const pad = 10;
+    
+    const getPointPos = (i) => {
+        const x = pad + (i / 5) * (w - 2 * pad);
+        const y = h - pad - state.curveData.weights[i] * (h - 2 * pad);
+        return {x, y};
+    };
+
+    const draw = () => {
+        ctx.clearRect(0,0,w,h);
+        const isDark = document.documentElement.classList.contains('dark');
+        ctx.strokeStyle = isDark ? '#475569' : '#cbd5e1';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, h-pad); ctx.lineTo(w-pad, h-pad); ctx.stroke();
+
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for(let i=0; i<6; i++) {
+            const pt = getPointPos(i);
+            if(i===0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = '#ec4899';
+        for(let i=0; i<6; i++) {
+            const pt = getPointPos(i);
+            ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI*2); ctx.fill();
+        }
+    };
+
+    cvs.onmousedown = (e) => {
+        const rect = cvs.getBoundingClientRect();
+        const mx = e.clientX - rect.left; const my = e.clientY - rect.top;
+        for(let i=0; i<6; i++) {
+            const pt = getPointPos(i);
+            if (Math.hypot(mx - pt.x, my - pt.y) < 10) {
+                state.curveData.draggingIndex = i;
+                break;
+            }
+        }
+    };
+
+    cvs.onmousemove = (e) => {
+        if (state.curveData.draggingIndex > -1) {
+            const rect = cvs.getBoundingClientRect();
+            const my = e.clientY - rect.top;
+            let val = 1 - (my - pad) / (h - 2 * pad);
+            val = Math.max(0, Math.min(1, val));
+            state.curveData.weights[state.curveData.draggingIndex] = val;
+            draw();
+        }
+    };
+
+    cvs.onmouseup = () => state.curveData.draggingIndex = -1;
+    cvs.onmouseleave = () => state.curveData.draggingIndex = -1;
+
+    draw();
+}
+
+function updateCurveData() { state.curveData.totalPeople = parseFloat(document.getElementById('inputTotalPeople').value) || 9000; }
+
+function getLambdaAtTime(simTimeSecs) {
+    const tHours = (simTimeSecs - CONFIG.SIM_START) / 3600;
+    if (tHours < 0 || tHours >= 5) return 0;
+    const idx = Math.floor(tHours);
+    const w = state.curveData.weights;
+    let currentWeight = 0;
+    if (idx >= 5) {
+        currentWeight = w[5];
+    } else {
+        const frac = tHours - idx;
+        currentWeight = w[idx] + (w[idx+1] - w[idx]) * frac;
+    }
+    
+    let area = 0;
+    for(let i=0; i<5; i++) area += 0.5 * (w[i] + w[i+1]);
+    if (area === 0) return 0;
+    
+    return (currentWeight / area) * state.curveData.totalPeople;
+}
+
+function renameProject() {
+    const titleEl = document.getElementById('projectTitle');
+    if (titleEl.querySelector('input')) return;
+    const input = document.createElement('input');
+    input.value = state.projectName;
+    input.className = "bg-transparent border-b border-blue-400 outline-none text-blue-600 dark:text-blue-400 font-bold w-32";
+    input.onblur = () => {
+        const val = input.value.trim();
+        if(val) state.projectName = val;
+        titleEl.innerText = state.projectName;
+    };
+    input.onkeydown = (e) => { if(e.key === 'Enter') input.blur(); };
+    titleEl.innerText = '';
+    titleEl.appendChild(input);
+    input.focus();
+    input.select();
+}
+
+function serializeState() {
+    return {
+        meta: { id: state.projectId, name: state.projectName, timestamp: Date.now(), version: "1.4" },
+        config: {
+            curveData: state.curveData,
+            speed: parseFloat(document.getElementById('inputSpeed').value) || 60,
+            agent: state.agentConfig,
+            escalator: { speedH: CONFIG.ESC_SPEED_H, speedV: CONFIG.ESC_SPEED_V }
+        },
+        visuals: {
+            floorVisibility: state.floorVisibility,
+            bgOpacity: document.getElementById('bgOpacity').value,
+            bgLocked: state.bgLocked,
+            showHeatmap: state.showHeatmap,
+            camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, tx: controls.target.x, ty: controls.target.y, tz: controls.target.z }
+        },
+        topology: {
+            walls: state.walls.map(w => ({
+                x: w.position.x, y: w.position.y, z: w.position.z,
+                rotY: w.rotation.y, scaleX: w.scale.x,
+                floorIndex: w.userData.floorIndex
+            })),
+            escalators: state.escalators.map(e => ({
+                id: e.id, x: e.group.position.x, z: e.group.position.z, baseFloorIdx: e.fFrom
+            })),
+            elevators: state.elevators.map(e => ({
+                id: e.id, x: e.x, z: e.z, fMin: e.fMin, fMax: e.fMax, capacity: e.capacity, speed: e.speed
+            })),
+            spawnPoints: state.spawnPoints.map(sp => ({
+                x: sp.x, z: sp.z, floor: sp.floor
+            }))
+        }
+    };
+}
+
+function exportProject() {
+    const btn = document.getElementById('btnExport');
+    const originalText = btn.innerText;
+    btn.innerText = '打包...';
+    
+    const zip = new JSZip();
+    const dataStr = JSON.stringify(serializeState());
+    zip.file("config.json", dataStr);
+    
+    if (state.bgDataUrl) {
+        const b64 = state.bgDataUrl.split(',')[1];
+        zip.file("bg.png", b64, {base64: true});
+    }
+
+    zip.generateAsync({type:"blob"}).then(function(content) {
+        saveAs(content, `${state.projectName}.zip`);
+        btn.innerText = originalText;
+    }).catch(err => {
+        console.error(err);
+        btn.innerText = '错误';
+        setTimeout(() => btn.innerText = originalText, 2000);
+    });
+}
+
+function importProject(event) {
+    const file = event.target.files[0];
+    if(!file) return;
+    if (state.sim.running) toggleSim();
+
+    const zip = new JSZip();
+    zip.loadAsync(file).then(async (zip) => {
+        const configStr = await zip.file("config.json").async("string");
+        const parsed = JSON.parse(configStr);
+        
+        let bgUrl = null;
+        const bgFile = zip.file("bg.png");
+        if (bgFile) {
+            const b64 = await bgFile.async("base64");
+            bgUrl = `data:image/png;base64,${b64}`;
+        }
+        
+        applyDeserializedState(parsed, bgUrl);
+        event.target.value = ''; 
+    }).catch(err => {
+        console.error("Import failed:", err);
+    });
+}
+
+function applyDeserializedState(data, bgUrl) {
+    state.projectId = data.meta.id || `proj_${Date.now()}`;
+    state.projectName = data.meta.name || "导入方案";
+    document.getElementById('projectTitle').innerText = state.projectName;
+
+    if (data.config.curveData) {
+        state.curveData = data.config.curveData;
+        document.getElementById('inputTotalPeople').value = state.curveData.totalPeople;
+        initCurveEditor();
+    }
+    state.sim.speed = data.config.speed || 60;
+    document.getElementById('inputSpeed').value = state.sim.speed;
+    
+    if (data.config.agent) {
+        state.agentConfig = data.config.agent;
+        document.getElementById('speedAdult').value = state.agentConfig.adultSpeed;
+        document.getElementById('speedPatient').value = state.agentConfig.patientSpeed;
+        document.getElementById('ratioPatient').value = state.agentConfig.patientRatio;
+        if(document.getElementById('bulkProb')) document.getElementById('bulkProb').value = state.agentConfig.bulkProb || 0.05;
+        if(document.getElementById('elevPref')) document.getElementById('elevPref').value = state.agentConfig.elevPref !== undefined ? state.agentConfig.elevPref : 0.5;
+        
+        if (state.agentConfig.destWeights) {
+            const dw = state.agentConfig.destWeights;
+            while(dw.length < CONFIG.FLOORS.length) dw.push(10);
+            for(let i=0; i<CONFIG.FLOORS.length; i++) {
+                const el = document.getElementById('weight_'+i);
+                if(el) el.value = dw[i];
+            }
+        }
+    }
+    if (data.config.escalator) {
+        CONFIG.ESC_SPEED_H = data.config.escalator.speedH;
+        CONFIG.ESC_SPEED_V = data.config.escalator.speedV;
+        if(document.getElementById('escSpeedH')) document.getElementById('escSpeedH').value = CONFIG.ESC_SPEED_H;
+        if(document.getElementById('escSpeedV')) document.getElementById('escSpeedV').value = CONFIG.ESC_SPEED_V;
+    }
+
+    const vis = data.visuals;
+    if (vis) {
+        state.floorVisibility = vis.floorVisibility || Array(CONFIG.FLOORS.length).fill(true);
+        while(state.floorVisibility.length < CONFIG.FLOORS.length) state.floorVisibility.unshift(true);
+        state.floorVisibility.forEach((v, i) => {
+            const cb = document.querySelectorAll('#floorToggles input[type="checkbox"]')[i];
+            if(cb) cb.checked = v;
+            toggleFloor(i, v);
+        });
+        
+        document.getElementById('bgOpacity').value = vis.bgOpacity !== undefined ? vis.bgOpacity : 50;
+        state.bgLocked = vis.bgLocked || false;
+        document.getElementById('bgLock').checked = state.bgLocked;
+        
+        state.showHeatmap = vis.showHeatmap !== false;
+        document.getElementById('toggleHeatmap').checked = state.showHeatmap;
+
+        if (vis.camera) {
+            camera.position.set(vis.camera.x, vis.camera.y, vis.camera.z);
+            controls.target.set(vis.camera.tx, vis.camera.ty, vis.camera.tz);
+            controls.update();
+        }
+    }
+
+    if (state.bgMesh) { scene.remove(state.bgMesh); transformControl.detach(); state.bgMesh = null; }
+    state.bgDataUrl = bgUrl;
+    if (bgUrl) {
+        const img = new Image();
+        img.onload = () => {
+            const tex = new THREE.CanvasTexture(img);
+            const geo = new THREE.PlaneGeometry(CONFIG.GRID_SIZE, CONFIG.GRID_SIZE * (img.height/img.width));
+            const mat = new THREE.MeshBasicMaterial({map: tex, transparent: true, opacity: document.getElementById('bgOpacity').value/100, depthWrite: false });
+            state.bgMesh = new THREE.Mesh(geo, mat); state.bgMesh.rotation.x = -Math.PI/2;
+            state.bgMesh.position.y = floorMeshes[state.activeFloorIndex].position.y + 0.05;
+            state.bgMesh.userData = { type: 'BG' };
+            scene.add(state.bgMesh);
+        };
+        img.src = bgUrl;
+    }
+
+    clearSelection();
+    state.walls.forEach(w => scene.remove(w)); state.walls = [];
+    state.escalators.forEach(e => scene.remove(e.group)); state.escalators = [];
+    state.elevators.forEach(e => scene.remove(e.group)); state.elevators = [];
+    state.spawnPoints.forEach(sp => scene.remove(sp.mesh)); state.spawnPoints = [];
+    
+    for(let i=scene.children.length-1; i>=0; i--) {
+        const obj = scene.children[i];
+        if (obj.geometry instanceof THREE.CylinderGeometry && obj.material.color.getHex() === 0xec4899) scene.remove(obj);
+    }
+
+    state.sim.agents = [];
+    agentInstancedMesh.count = 0;
+    
+    const topo = data.topology;
+    if (topo) {
+        if (topo.walls) {
+            const geo = new THREE.BoxGeometry(1, 4, 0.5); geo.computeBoundingBox();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x64748b, transparent: true, opacity: 1 });
+            topo.walls.forEach(wd => {
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(wd.x, wd.y, wd.z);
+                mesh.rotation.y = wd.rotY;
+                mesh.scale.x = wd.scaleX;
+                mesh.userData = { type: 'WALL', floorIndex: wd.floorIndex };
+                scene.add(mesh);
+                state.walls.push(mesh);
+            });
+        }
+        
+        if (topo.escalators) {
+            topo.escalators.forEach(e => createEscalator(e.x, e.z, e.baseFloorIdx));
+        }
+
+        if (topo.elevators) {
+            topo.elevators.forEach(e => createElevator(e.x, e.z, e.fMin, e.fMax, e.capacity, e.speed));
+        }
+
+        if (topo.spawnPoints) {
+            topo.spawnPoints.forEach(sp => {
+                const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.2, 16), new THREE.MeshStandardMaterial({ color: 0xec4899 }));
+                mesh.position.set(sp.x, floorMeshes[sp.floor].position.y + 0.1, sp.z);
+                mesh.userData = { type: 'SPAWN', floorIndex: sp.floor };
+                scene.add(mesh);
+                state.spawnPoints.push({ x: sp.x, z: sp.z, floor: sp.floor, mesh: mesh });
+            });
+        }
+    }
+
+    updateWallGrids();
+    state.pathCache.clear();
+    resetSimStateVariables();
+}
+
+function resetSim() {
+    if(state.sim.running) toggleSim();
+    resetSimStateVariables();
+}
+
+function resetSimStateVariables() {
+    state.sim.time = CONFIG.SIM_START;
+    state.sim.arrivalAcc = 0;
+    state.sim.nextThreshold = -Math.log(1 - Math.random());
+    state.sim.completed = 0;
+    state.sim.completedLog = [];
+    state.sim.completedElevLog = [];
+    state.sim.queueLog = [];
+    
+    CONFIG.FLOORS.forEach(f => state.sim.sankeyData[f] = 0);
+    
+    state.sim.metrics = { 
+        Lmax: 0, cycleWqMax: 0, inPeak: false, peakEndTime: null,
+        escWqSum: 0, escWqCount: 0, elevWqSum: 0, elevWqCount: 0
+    };
+    state.escMetrics = { ce5: 0, epsilon: 0, history: [] };
+    state.elevMetrics = { ce5: 0, epsilon: 0, history: [] };
+    
+    state.sim.agents = [];
+    agentInstancedMesh.count = 0;
+
+    state.escalators.forEach(e => {
+        e.up.queue = []; e.down.queue = [];
+        e.up.acc = 0; e.down.acc = 0;
+    });
+
+    state.elevators.forEach(e => {
+        e.queues.forEach(q => q.length = 0);
+        e.passengers = [];
+        e.state = 'IDLE';
+        e.currentFloor = e.fMin;
+        e.cabinMesh.position.y = e.fMin * CONFIG.FLOOR_H + 2;
+        e.timer = 0;
+        e.direction = 1;
+    });
+    
+    charts.queue.setOption({ series: [{data:[]},{data:[]},{data:[]}] });
+    charts.escCE5Trend.setOption({ xAxis:{data:[]}, series: [{data:[]}] });
+    charts.escEpsTrend.setOption({ xAxis:{data:[]}, series: [{data:[]}] });
+    charts.elCE5Trend.setOption({ xAxis:{data:[]}, series: [{data:[]}] });
+    charts.elEpsTrend.setOption({ xAxis:{data:[]}, series: [{data:[]}] });
+    updateSankey();
+    updateMetrics();
+    updateHeatmaps();
+    
+    document.getElementById('clock').innerText = getSimDateTimeString(state.sim.time);
+}
+
+function updateSimSpeed() {
+    const val = parseFloat(document.getElementById('inputSpeed').value);
+    if (!isNaN(val) && val > 0) {
+        state.sim.speed = val;
+    } else {
+        document.getElementById('inputSpeed').value = state.sim.speed;
+    }
+}
+
+function updateAgentConfig() {
+    state.agentConfig.adultSpeed = parseFloat(document.getElementById('speedAdult').value) || 1.2;
+    state.agentConfig.patientSpeed = parseFloat(document.getElementById('speedPatient').value) || 0.6;
+    state.agentConfig.patientRatio = parseFloat(document.getElementById('ratioPatient').value) || 0.2;
+    state.agentConfig.bulkProb = parseFloat(document.getElementById('bulkProb').value) || 0.05;
+    if(document.getElementById('elevPref')) state.agentConfig.elevPref = parseFloat(document.getElementById('elevPref').value) || 0;
+}
+
+function updateDestWeights() {
+    for(let i=0; i<CONFIG.FLOORS.length; i++) {
+        state.agentConfig.destWeights[i] = parseFloat(document.getElementById('weight_'+i).value) || 0;
+    }
+}
+
+function updateEscConfig() {
+    if(document.getElementById('escSpeedH')) CONFIG.ESC_SPEED_H = parseFloat(document.getElementById('escSpeedH').value) || 0.5;
+    if(document.getElementById('escSpeedV')) CONFIG.ESC_SPEED_V = parseFloat(document.getElementById('escSpeedV').value) || 0.25;
+}
+
+function switchTab(tab, event) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('tab-'+tab).classList.add('active');
+    if(tab === 'escalator-metrics') {
+        if(charts.escCE5) charts.escCE5.resize();
+        if(charts.escEps) charts.escEps.resize();
+        if(charts.escCE5Trend) charts.escCE5Trend.resize();
+        if(charts.escEpsTrend) charts.escEpsTrend.resize();
+        if(charts.elCE5) charts.elCE5.resize();
+        if(charts.elEps) charts.elEps.resize();
+        if(charts.elCE5Trend) charts.elCE5Trend.resize();
+        if(charts.elEpsTrend) charts.elEpsTrend.resize();
+        updateEscMetricsCharts();
+    }
+}
+
+function initThree() {
+    const container = document.getElementById('canvas-container');
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x0f172a, 0.005);
+
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+    camera.position.set(0, 100, 120);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setClearColor(0x0f172a, 1);
+    container.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.target.set(0, 15, 0);
+
+    transformControl = new THREE.TransformControls(camera, renderer.domElement);
+    transformControl.addEventListener('dragging-changed', function (event) {
+        controls.enabled = !event.value;
+        if (!event.value) {
+            state.spawnPoints.forEach(sp => { sp.x = sp.mesh.position.x; sp.z = sp.mesh.position.z; });
+            state.elevators.forEach(e => { e.x = e.group.position.x; e.z = e.group.position.z; });
+            updateWallGrids(); state.pathCache.clear(); 
+        }
+    });
+    scene.add(transformControl);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6); dirLight.position.set(50, 100, 50); scene.add(dirLight);
+
+    const planeGeo = new THREE.PlaneGeometry(CONFIG.GRID_SIZE, CONFIG.GRID_SIZE);
+    CONFIG.FLOORS.forEach((name, i) => {
+        const y = i * CONFIG.FLOOR_H;
+        const canvas = document.createElement('canvas'); canvas.width = CONFIG.GRID_SIZE; canvas.height = CONFIG.GRID_SIZE;
+        const ctx = canvas.getContext('2d'); 
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+        const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+        
+        const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, map: tex, depthWrite: false });
+        const plane = new THREE.Mesh(planeGeo, mat);
+        plane.rotation.x = -Math.PI / 2; plane.position.y = y; plane.userData = { isFloor: true, index: i };
+        scene.add(plane); floorMeshes.push(plane);
+        heatmaps.push(canvas); heatmapCtxs.push(ctx); heatmapTextures.push(tex);
+
+        const grid = new THREE.GridHelper(CONFIG.GRID_SIZE, CONFIG.GRID_SIZE, 0x334155, 0x1e293b);
+        grid.position.y = y + 0.01; scene.add(grid); plane.userData.grid = grid;
+    });
+
+    const agentGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.6, 8);
+    const agentMat = new THREE.MeshStandardMaterial({ color: 0x10b981 });
+    agentInstancedMesh = new THREE.InstancedMesh(agentGeo, agentMat, CONFIG.MAX_AGENTS); 
+    agentInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(agentInstancedMesh);
+    dummy = new THREE.Object3D();
+
+    raycaster = new THREE.Raycaster(); mouse = new THREE.Vector2();
+    window.addEventListener('resize', onWindowResize);
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('keydown', onKeyDown);
+}
+
+// ---- Selection & Manipulation Logic ----
+function setHighlight(obj, isSelected) {
+    if (!obj) return;
+    const colorHex = isSelected ? 0x666666 : 0x000000;
+    obj.traverse(child => {
+        if (child.isMesh && child.material && child.material.emissive && obj.userData.type !== 'BG') {
+            child.material.emissive.setHex(colorHex);
+        }
+    });
+}
+
+function updateSelectionDisplay() {
+    state.selectedObjects.forEach(obj => setHighlight(obj, true));
+    if (state.selectedObjects.length === 1) {
+        transformControl.attach(state.selectedObjects[0]);
+    } else {
+        transformControl.detach(); // Native TransformControls does not support multiple objects easily
+    }
+}
+
+function clearSelection() {
+    state.selectedObjects.forEach(obj => setHighlight(obj, false));
+    state.selectedObjects = [];
+    transformControl.detach();
+}
+
+function deleteSelected() {
+    if (state.selectedObjects.length === 0 || state.sim.running) return;
+    state.selectedObjects.forEach(obj => {
+        if(obj.userData.type === 'WALL') {
+            state.walls = state.walls.filter(w => w !== obj);
+            scene.remove(obj);
+        } else if(obj.userData.type === 'ESCALATOR') {
+            state.escalators = state.escalators.filter(e => e.group !== obj);
+            scene.remove(obj);
+        } else if(obj.userData.type === 'ELEVATOR') {
+            state.elevators = state.elevators.filter(e => e.group !== obj);
+            scene.remove(obj);
+        } else if(obj.userData.type === 'SPAWN') {
+            state.spawnPoints = state.spawnPoints.filter(sp => sp.mesh !== obj);
+            scene.remove(obj);
+        } else if(obj.userData.type === 'BG') {
+            state.bgMesh = null; state.bgDataUrl = null;
+            scene.remove(obj);
+        }
+    });
+    clearSelection();
+    updateWallGrids();
+    state.pathCache.clear();
+}
+
+function duplicateSelected() {
+    if (state.selectedObjects.length === 0 || state.sim.running) return;
+    const newSelection = [];
+    state.selectedObjects.forEach(obj => {
+        const offset = 2;
+        if (obj.userData.type === 'WALL') {
+            const newWall = obj.clone();
+            newWall.position.x += offset; newWall.position.z += offset;
+            scene.add(newWall); state.walls.push(newWall);
+            newSelection.push(newWall);
+        } else if (obj.userData.type === 'ESCALATOR') {
+            const eData = state.escalators.find(e => e.group === obj);
+            if(eData) {
+                const newEsc = createEscalator(obj.position.x + offset, obj.position.z + offset, eData.fFrom);
+                if(newEsc) newSelection.push(newEsc.group);
+            }
+        } else if (obj.userData.type === 'ELEVATOR') {
+            const eData = state.elevators.find(e => e.group === obj);
+            if(eData) {
+                const newEl = createElevator(obj.position.x + offset, obj.position.z + offset, eData.fMin, eData.fMax, eData.capacity, eData.speed);
+                if(newEl) newSelection.push(newEl.group);
+            }
+        } else if (obj.userData.type === 'SPAWN') {
+            const sp = state.spawnPoints.find(s => s.mesh === obj);
+            if(sp) {
+                const newMesh = obj.clone();
+                newMesh.position.x += offset; newMesh.position.z += offset;
+                scene.add(newMesh);
+                state.spawnPoints.push({x: sp.x + offset, z: sp.z + offset, floor: sp.floor, mesh: newMesh});
+                newSelection.push(newMesh);
+            }
+        }
+    });
+    clearSelection();
+    state.selectedObjects = newSelection;
+    updateSelectionDisplay();
+    updateWallGrids();
+    state.pathCache.clear();
+}
+
+function onKeyDown(e) {
+    if(e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        deleteSelected();
+    } else if (e.ctrlKey && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'v')) {
+        duplicateSelected();
+        e.preventDefault();
+    } else if (e.key.toLowerCase() === 't') {
+        setTransformMode('translate');
+    } else if (e.key.toLowerCase() === 'r') {
+        setTransformMode('rotate');
+    } else if (e.key.toLowerCase() === 's') {
+        setTransformMode('scale');
+    } else if (e.key === 'Escape') {
+        clearSelection();
+        closeElevModal();
+        if(state.mode === 'ELEVATOR') setMode('SELECT');
+    }
+}
+// ---- End Selection Logic ----
+
+function initUI() {
+    const wg = document.getElementById('weightsGrid');
+    wg.innerHTML = '';
+    CONFIG.FLOORS.forEach((f, i) => {
+        wg.innerHTML += `<div><label class="block text-slate-600 dark:text-gray-400">${f}</label><input type="number" id="weight_${i}" value="${state.agentConfig.destWeights[i]}" min="0" onchange="updateDestWeights()" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1 text-center"></div>`;
+    });
+
+    const ft = document.getElementById('floorToggles');
+    ft.innerHTML = '';
+    CONFIG.FLOORS.forEach((f, i) => {
+        ft.innerHTML += `
+            <label class="flex items-center gap-2 text-[11px] text-gray-400 bg-white dark:bg-slate-900 px-1 py-0.5 rounded shadow-sm border border-slate-100 dark:border-slate-700">
+                <input type="checkbox" checked onchange="toggleFloor(${i}, this.checked)" class="accent-blue-500 w-3 h-3">
+                ${f}
+                <input type="radio" name="activeFloor" ${i===2?'checked':''} onchange="state.activeFloorIndex=${i}" class="ml-auto accent-green-500 w-3 h-3" title="设为当前操作层">
+            </label>
+        `;
+    });
+
+    const elMin = document.getElementById('elevMin');
+    const elMax = document.getElementById('elevMax');
+    elMin.innerHTML = ''; elMax.innerHTML = '';
+    CONFIG.FLOORS.forEach((f, i) => {
+        elMin.innerHTML += `<option value="${i}">${f}</option>`;
+        elMax.innerHTML += `<option value="${i}" ${i === CONFIG.FLOORS.length-1 ? 'selected' : ''}>${f}</option>`;
+    });
+
+    document.getElementById('clock').innerText = getSimDateTimeString(state.sim.time);
+    initCurveEditor();
+}
+
+function openElevModal() {
+    document.getElementById('elevModal').style.display = 'block';
+    document.getElementById('modalOverlay').style.display = 'block';
+    controls.enabled = false;
+}
+
+function closeElevModal() {
+    document.getElementById('elevModal').style.display = 'none';
+    document.getElementById('modalOverlay').style.display = 'none';
+    controls.enabled = true;
+}
+
+function confirmElevModal() {
+    const fMin = parseInt(document.getElementById('elevMin').value);
+    const fMax = parseInt(document.getElementById('elevMax').value);
+    if(fMin >= fMax) {
+        alert("起止楼层设置有误，请确保结束楼层大于起始楼层。");
+        return;
+    }
+    state.elevPending.fMin = fMin;
+    state.elevPending.fMax = fMax;
+    state.elevPending.cap = parseInt(document.getElementById('elevCap').value) || 15;
+    state.elevPending.spd = parseFloat(document.getElementById('elevSpd').value) || 2.0;
+    
+    closeElevModal();
+    setMode('ELEVATOR');
+}
+
+function initCharts() {
+    charts.queue = echarts.init(document.getElementById('chartQueue'));
+    charts.queue.setOption({
+        animation: false, tooltip: { trigger: 'axis' }, grid: { left: 30, right: 10, top: 30, bottom: 20 },
+        legend: { data: ['滞留人数'], textStyle: { color: '#94a3b8', fontSize: 10 } },
+        xAxis: { type: 'category', axisLabel: { color: '#64748b', formatter: function(val){ return val.substring(11, 16); } }, splitLine:{show:false} },
+        yAxis: { type: 'value', axisLabel: { color: '#64748b' }, splitLine:{lineStyle:{color:'#334155'}} },
+        series: [{ name: '滞留人数', type: 'line', data: [], lineStyle: { color: '#eab308' }, showSymbol: false }]
+    });
+    
+    charts.sankey = echarts.init(document.getElementById('chartSankey'));
+    updateSankey();
+
+    charts.escCE5 = echarts.init(document.getElementById('chartEscCE5'));
+    charts.escEps = echarts.init(document.getElementById('chartEscEpsilon'));
+    charts.elCE5 = echarts.init(document.getElementById('chartElCE5'));
+    charts.elEps = echarts.init(document.getElementById('chartElEpsilon'));
+    
+    const trendOpt = (color) => ({
+        animation: false, tooltip: { trigger: 'axis' }, grid: { left: 10, right: 10, top: 5, bottom: 5 },
+        xAxis: { type: 'category', data: [], show: false },
+        yAxis: { type: 'value', show: false, min: 0, max: 100 },
+        series: [{ type: 'line', data: [], lineStyle: { color: color, width: 1 }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: color},{offset: 1, color: 'transparent'}])}, showSymbol: false }]
+    });
+
+    charts.escCE5Trend = echarts.init(document.getElementById('chartEscCE5Trend'));
+    charts.escCE5Trend.setOption(trendOpt('#38bdf8'));
+    charts.escEpsTrend = echarts.init(document.getElementById('chartEscEpsTrend'));
+    charts.escEpsTrend.setOption(trendOpt('#a855f7'));
+    
+    charts.elCE5Trend = echarts.init(document.getElementById('chartElCE5Trend'));
+    charts.elCE5Trend.setOption(trendOpt('#3b82f6'));
+    charts.elEpsTrend = echarts.init(document.getElementById('chartElEpsTrend'));
+    charts.elEpsTrend.setOption(trendOpt('#6366f1'));
+}
+
+function initEscMetricsCharts() {
+    const gaugeOpt = (title, color) => ({
+        series: [{
+            type: 'gauge', radius: '90%', startAngle: 180, endAngle: 0, min: 0, max: 100, splitNumber: 2,
+            axisLine: { lineStyle: { width: 6, color: [[1, color]] } }, pointer: { length: '50%', width: 2 },
+            axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+            detail: { show: false }, title: { show: false },
+            data: [{ value: 0 }]
+        }]
+    });
+    
+    charts.escCE5.setOption(gaugeOpt('ESC CE5', '#38bdf8'));
+    charts.escEps.setOption(gaugeOpt('ESC EPS', '#a855f7'));
+    charts.elCE5.setOption(gaugeOpt('EL CE5', '#3b82f6'));
+    charts.elEps.setOption(gaugeOpt('EL EPS', '#6366f1'));
+}
+
+function updateEscMetricsCharts() {
+    if(!charts.escCE5) return;
+    
+    const escCe5 = state.escMetrics.ce5.toFixed(1);
+    const escEps = state.escMetrics.epsilon.toFixed(1);
+    const elCe5 = state.elevMetrics.ce5.toFixed(1);
+    const elEps = state.elevMetrics.epsilon.toFixed(1);
+    
+    charts.escCE5.setOption({ series: [{ data: [{ value: escCe5 }] }] });
+    charts.escEps.setOption({ series: [{ data: [{ value: escEps }] }] });
+    charts.elCE5.setOption({ series: [{ data: [{ value: elCe5 }] }] });
+    charts.elEps.setOption({ series: [{ data: [{ value: elEps }] }] });
+    
+    document.getElementById('esc-ce5-badge').innerText = `${escCe5}%`; 
+    document.getElementById('esc-eps-badge').innerText = `${escEps}%`;
+    document.getElementById('el-ce5-badge').innerText = `${elCe5}%`; 
+    document.getElementById('el-eps-badge').innerText = `${elEps}%`;
+
+    const times = state.escMetrics.history.map(d => d[0].substring(11, 16));
+    charts.escCE5Trend.setOption({ xAxis: { data: times }, series: [{ data: state.escMetrics.history.map(d => d[1]) }] });
+    charts.escEpsTrend.setOption({ xAxis: { data: times }, series: [{ data: state.escMetrics.history.map(d => d[2]) }] });
+    charts.elCE5Trend.setOption({ xAxis: { data: times }, series: [{ data: state.elevMetrics.history.map(d => d[1]) }] });
+    charts.elEpsTrend.setOption({ xAxis: { data: times }, series: [{ data: state.elevMetrics.history.map(d => d[2]) }] });
+}
+
+function setMode(mode) {
+    state.mode = mode;
+    document.querySelectorAll('[id^="mode_"]').forEach(el => el.classList.remove('active'));
+    const btn = document.getElementById('mode_' + mode); if(btn) btn.classList.add('active');
+    
+    if (state.wallDraw.active && state.wallDraw.mesh) scene.remove(state.wallDraw.mesh);
+    state.wallDraw.active = false;
+    if (state.measureDraw.active && state.measureDraw.line) scene.remove(state.measureDraw.line);
+    state.measureDraw.active = false;
+    if (mode !== 'SELECT') clearSelection();
+}
+
+function setTransformMode(tMode) { if(transformControl) transformControl.setMode(tMode); }
+
+function toggleFloor(idx, isVisible) {
+    state.floorVisibility[idx] = isVisible; 
+    if(floorMeshes[idx]) {
+        floorMeshes[idx].visible = isVisible; 
+        if(floorMeshes[idx].userData.grid) floorMeshes[idx].userData.grid.visible = isVisible;
+    }
+}
+
+function uploadBg(e) {
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+            state.bgDataUrl = event.target.result; 
+            const tex = new THREE.CanvasTexture(img);
+            if(state.bgMesh) { scene.remove(state.bgMesh); if(transformControl) transformControl.detach(); }
+            const geo = new THREE.PlaneGeometry(CONFIG.GRID_SIZE, CONFIG.GRID_SIZE * (img.height/img.width));
+            const mat = new THREE.MeshBasicMaterial({map: tex, transparent: true, opacity: document.getElementById('bgOpacity').value/100, depthWrite: false });
+            state.bgMesh = new THREE.Mesh(geo, mat); state.bgMesh.rotation.x = -Math.PI/2;
+            state.bgMesh.position.y = floorMeshes[state.activeFloorIndex].position.y + 0.05;
+            state.bgMesh.userData = { type: 'BG' };
+            scene.add(state.bgMesh);
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function updateBg() { if(state.bgMesh) state.bgMesh.material.opacity = document.getElementById('bgOpacity').value / 100; }
+
+function getIntersectPoint(e) {
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(floorMeshes[state.activeFloorIndex]);
+    return intersects.length > 0 ? intersects[0].point : null;
+}
+
+function onPointerDown(e) {
+    if(e.button !== 0 || (transformControl && transformControl.dragging)) return;
+    
+    if (state.mode === 'SELECT') {
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        let selectables = [...state.walls, ...state.escalators.map(esc => esc.group), ...state.elevators.map(el => el.group), ...state.spawnPoints.map(sp => sp.mesh)];
+        if(state.bgMesh && !state.bgLocked) selectables.push(state.bgMesh);
+        
+        const intersects = raycaster.intersectObjects(selectables, true);
+        
+        if (intersects.length > 0) {
+            let obj = intersects[0].object;
+            while(obj.parent && obj.parent !== scene && !['BG', 'WALL', 'ESCALATOR', 'ELEVATOR', 'SPAWN'].includes(obj.userData.type)) {
+                obj = obj.parent;
+            }
+            
+            if (e.shiftKey) {
+                const idx = state.selectedObjects.indexOf(obj);
+                if (idx > -1) {
+                    setHighlight(obj, false);
+                    state.selectedObjects.splice(idx, 1);
+                } else {
+                    state.selectedObjects.push(obj);
+                }
+            } else {
+                if(!state.selectedObjects.includes(obj)) {
+                    clearSelection();
+                    state.selectedObjects = [obj];
+                }
+            }
+            updateSelectionDisplay();
+        } else {
+            if (e.shiftKey) {
+                isBoxSelecting = true;
+                selectStartPoint.x = e.clientX; selectStartPoint.y = e.clientY;
+                const boxEl = document.getElementById('selection-box');
+                boxEl.style.display = 'block';
+                boxEl.style.left = e.clientX + 'px'; boxEl.style.top = e.clientY + 'px';
+                boxEl.style.width = '0px'; boxEl.style.height = '0px';
+                controls.enabled = false;
+            } else {
+                clearSelection();
+            }
+        }
+        return;
+    }
+
+    const p = getIntersectPoint(e); if (!p) return;
+
+    if (state.mode === 'ESCALATOR') {
+        createEscalator(p.x, p.z, state.activeFloorIndex);
+    } else if (state.mode === 'ELEVATOR') {
+        createElevator(p.x, p.z, state.elevPending.fMin, state.elevPending.fMax, state.elevPending.cap, state.elevPending.spd);
+        setMode('SELECT'); 
+    } else if (state.mode === 'SPAWN') {
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.2, 16), new THREE.MeshStandardMaterial({ color: 0xec4899 }));
+        mesh.position.set(p.x, floorMeshes[state.activeFloorIndex].position.y + 0.1, p.z);
+        mesh.userData = { type: 'SPAWN', floorIndex: state.activeFloorIndex };
+        scene.add(mesh);
+        state.spawnPoints.push({ x: p.x, z: p.z, floor: state.activeFloorIndex, mesh: mesh });
+    } else if (state.mode === 'WALL') {
+        if (!state.wallDraw.active) {
+            state.wallDraw.active = true; state.wallDraw.p1 = p.clone();
+            const geo = new THREE.BoxGeometry(1, 4, 0.5); geo.computeBoundingBox();
+            state.wallDraw.mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x64748b, transparent: true, opacity: 0.6 }));
+            state.wallDraw.mesh.userData = { type: 'WALL', floorIndex: state.activeFloorIndex };
+            scene.add(state.wallDraw.mesh);
+        } else {
+            state.wallDraw.mesh.material.opacity = 1; state.walls.push(state.wallDraw.mesh);
+            state.wallDraw.active = false; state.wallDraw.mesh = null; updateWallGrids(); state.pathCache.clear();
+        }
+    } else if (state.mode === 'MEASURE') {
+        if (!state.measureDraw.active) {
+            state.measureDraw.active = true; state.measureDraw.p1 = p.clone();
+            state.measureDraw.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p, p]), new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 2 })); 
+            scene.add(state.measureDraw.line);
+        } else {
+            const p2 = p.clone(); const dist = state.measureDraw.p1.distanceTo(p2);
+            const mid = new THREE.Vector3().addVectors(state.measureDraw.p1, p2).multiplyScalar(0.5);
+            state.measurements.push({ line: state.measureDraw.line, center: mid, text: dist.toFixed(2) + ' m' });
+            state.measureDraw.active = false; state.measureDraw.line = null;
+        }
+    }
+}
+
+function onPointerMove(e) {
+    if (isBoxSelecting) {
+        const boxEl = document.getElementById('selection-box');
+        const minX = Math.min(selectStartPoint.x, e.clientX);
+        const maxX = Math.max(selectStartPoint.x, e.clientX);
+        const minY = Math.min(selectStartPoint.y, e.clientY);
+        const maxY = Math.max(selectStartPoint.y, e.clientY);
+
+        boxEl.style.left = minX + 'px';
+        boxEl.style.top = minY + 'px';
+        boxEl.style.width = (maxX - minX) + 'px';
+        boxEl.style.height = (maxY - minY) + 'px';
+        return;
+    }
+
+    if (state.mode === 'WALL' && state.wallDraw.active && state.wallDraw.mesh) {
+        const p2 = getIntersectPoint(e);
+        if (p2) {
+            const p1 = state.wallDraw.p1; const dist = p1.distanceTo(p2);
+            const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+            mid.y = floorMeshes[state.activeFloorIndex].position.y + 2; 
+            state.wallDraw.mesh.position.copy(mid); state.wallDraw.mesh.rotation.y = Math.atan2(p1.x - p2.x, p1.z - p2.z) + Math.PI/2; 
+            state.wallDraw.mesh.scale.set(dist || 0.1, 1, 1);
+        }
+    } else if (state.mode === 'MEASURE' && state.measureDraw.active && state.measureDraw.line) {
+        const p2 = getIntersectPoint(e);
+        if (p2) {
+            const positions = state.measureDraw.line.geometry.attributes.position.array;
+            positions[3] = p2.x; positions[4] = p2.y; positions[5] = p2.z;
+            state.measureDraw.line.geometry.attributes.position.needsUpdate = true;
+        }
+    }
+}
+
+function onPointerUp(e) {
+    if (isBoxSelecting) {
+        isBoxSelecting = false;
+        document.getElementById('selection-box').style.display = 'none';
+        controls.enabled = true;
+
+        const minX = Math.min(selectStartPoint.x, e.clientX);
+        const maxX = Math.max(selectStartPoint.x, e.clientX);
+        const minY = Math.min(selectStartPoint.y, e.clientY);
+        const maxY = Math.max(selectStartPoint.y, e.clientY);
+
+        if (maxX - minX < 5 && maxY - minY < 5) return;
+
+        const ndcMinX = (minX / window.innerWidth) * 2 - 1;
+        const ndcMaxX = (maxX / window.innerWidth) * 2 - 1;
+        const ndcMinY = -(maxY / window.innerHeight) * 2 + 1; 
+        const ndcMaxY = -(minY / window.innerHeight) * 2 + 1;
+
+        let selectables = [...state.walls, ...state.escalators.map(esc => esc.group), ...state.elevators.map(el => el.group), ...state.spawnPoints.map(sp => sp.mesh)];
+
+        selectables.forEach(obj => {
+            const pos = new THREE.Vector3();
+            obj.getWorldPosition(pos);
+            pos.project(camera);
+            if (pos.z > 1 || pos.z < -1) return;
+            if (pos.x >= ndcMinX && pos.x <= ndcMaxX && pos.y >= ndcMinY && pos.y <= ndcMaxY) {
+                if (!state.selectedObjects.includes(obj)) {
+                    state.selectedObjects.push(obj);
+                }
+            }
+        });
+        updateSelectionDisplay();
+    }
+}
+
+function createEscalator(x, z, baseFloorIdx) {
+    if (baseFloorIdx >= CONFIG.FLOORS.length - 1) return null;
+    
+    const y1 = baseFloorIdx * CONFIG.FLOOR_H;
+    const y2 = (baseFloorIdx + 1) * CONFIG.FLOOR_H;
+    const length = 12; 
+    const spacing = 1.5; 
+
+    const id = 'esc_' + Date.now() + Math.random().toString(36).substr(2, 5);
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.userData = { type: 'ESCALATOR' };
+
+    const upEntry = new THREE.Object3D(); upEntry.position.set(-spacing, y1, -length/2);
+    const upExit = new THREE.Object3D(); upExit.position.set(-spacing, y2, length/2);
+    
+    const downEntry = new THREE.Object3D(); downEntry.position.set(spacing, y2, -length/2);
+    const downExit = new THREE.Object3D(); downExit.position.set(spacing, y1, length/2);
+
+    group.add(upEntry, upExit, downEntry, downExit);
+
+    const upMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 2 });
+    const downMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2 });
+    
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([upEntry.position, upExit.position]), upMat));
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([downEntry.position, downExit.position]), downMat));
+
+    const markGeo = new THREE.BoxGeometry(2, 0.3, 2);
+    const upMark = new THREE.Mesh(markGeo, new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.6 }));
+    const downMark = new THREE.Mesh(markGeo, new THREE.MeshStandardMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.6 }));
+    upMark.position.copy(upEntry.position); downMark.position.copy(downEntry.position);
+    group.add(upMark, downMark);
+
+    scene.add(group);
+
+    const escData = {
+        id, group, fFrom: baseFloorIdx, fTo: baseFloorIdx + 1,
+        up: { entry: upEntry, exit: upExit, queue: [], acc: 0, queueDirZ: -1 },
+        down: { entry: downEntry, exit: downExit, queue: [], acc: 0, queueDirZ: -1 }
+    };
+    state.escalators.push(escData);
+    return escData;
+}
+
+function createElevator(x, z, fMin, fMax, capacity, speed) {
+    if(fMin >= fMax || fMax >= CONFIG.FLOORS.length) return null;
+    
+    const id = 'el_' + Date.now() + Math.random().toString(36).substr(2, 5);
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.userData = { type: 'ELEVATOR' };
+
+    const yMin = fMin * CONFIG.FLOOR_H;
+    const yMax = fMax * CONFIG.FLOOR_H;
+    const h = yMax - yMin + CONFIG.FLOOR_H;
+    
+    const shaftGeo = new THREE.BoxGeometry(3.2, h, 3.2);
+    const shaftMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.2, depthWrite: false });
+    const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+    shaft.position.y = yMin + h/2 - CONFIG.FLOOR_H/2;
+    group.add(shaft);
+
+    const markGeo = new THREE.PlaneGeometry(2, 1);
+    const markMat = new THREE.MeshBasicMaterial({ color: 0x6366f1, side: THREE.DoubleSide });
+    for(let f = fMin; f <= fMax; f++) {
+        const mark = new THREE.Mesh(markGeo, markMat);
+        mark.rotation.x = -Math.PI/2;
+        mark.position.set(0, f * CONFIG.FLOOR_H + 0.05, 2); 
+        group.add(mark);
+    }
+
+    const cabinGeo = new THREE.BoxGeometry(2.8, 3.8, 2.8);
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x818cf8, transparent: true, opacity: 0.8 });
+    const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+    cabin.position.y = yMin + 2; 
+    group.add(cabin);
+
+    scene.add(group);
+
+    const elData = {
+        id, group, x, z, fMin, fMax, capacity, speed, cabinMesh: cabin,
+        currentFloor: fMin, targetFloor: null, state: 'IDLE', timer: 0, direction: 1,
+        queues: Array(CONFIG.FLOORS.length).fill(null).map(() => []),
+        passengers: []
+    };
+    state.elevators.push(elData);
+    return elData;
+}
+
+function updateWallGrids() {
+    for(let f = 0; f < CONFIG.FLOORS.length; f++) state.wallGrids[f].fill(0);
+    const localPt = new THREE.Vector3();
+    
+    state.walls.forEach(w => {
+        const fl = w.userData.floorIndex; if(fl === undefined || fl < 0 || fl >= CONFIG.FLOORS.length) return;
+        w.updateMatrixWorld(); const invMat = new THREE.Matrix4().copy(w.matrixWorld).invert();
+        const bounds = w.geometry.boundingBox; if (!bounds) return;
+
+        const boxWorld = new THREE.Box3().setFromObject(w);
+        const minX = Math.max(0, Math.floor(boxWorld.min.x + CONFIG.GRID_SIZE / 2));
+        const maxX = Math.min(CONFIG.GRID_SIZE - 1, Math.ceil(boxWorld.max.x + CONFIG.GRID_SIZE / 2));
+        const minZ = Math.max(0, Math.floor(boxWorld.min.z + CONFIG.GRID_SIZE / 2));
+        const maxZ = Math.min(CONFIG.GRID_SIZE - 1, Math.ceil(boxWorld.max.z + CONFIG.GRID_SIZE / 2));
+
+        for(let z = minZ; z <= maxZ; z++) {
+            for(let x = minX; x <= maxX; x++) {
+                localPt.set(x - CONFIG.GRID_SIZE / 2 + 0.5, w.position.y, z - CONFIG.GRID_SIZE / 2 + 0.5); localPt.applyMatrix4(invMat);
+                if(localPt.x >= bounds.min.x - 0.4 && localPt.x <= bounds.max.x + 0.4 && localPt.z >= bounds.min.z - 0.4 && localPt.z <= bounds.max.z + 0.4) {
+                    state.wallGrids[fl][z * CONFIG.GRID_SIZE + x] = 1;
+                }
+            }
+        }
+    });
+}
+
+function calculatePathAStar(startX, startZ, endX, endZ, fl) {
+    const gxStart = Math.floor(startX + CONFIG.GRID_SIZE / 2); const gzStart = Math.floor(startZ + CONFIG.GRID_SIZE / 2);
+    const gxEnd = Math.floor(endX + CONFIG.GRID_SIZE / 2); const gzEnd = Math.floor(endZ + CONFIG.GRID_SIZE / 2);
+    
+    if (gxStart === gxEnd && gzStart === gzEnd) return [];
+    const cacheKey = `${gxStart},${gzStart}_${gxEnd},${gzEnd}_${fl}`;
+    if (state.pathCache.has(cacheKey)) return state.pathCache.get(cacheKey);
+
+    const grid = state.wallGrids[fl]; const open = [{x: gxStart, z: gzStart, f: 0}];
+    const closed = new Set(); const cameFrom = new Map(); const gScore = new Map();
+    const toKey = (x, z) => `${x},${z}`; gScore.set(toKey(gxStart, gzStart), 0);
+    
+    let iters = 0;
+    while(open.length > 0 && iters < 1500) {
+        open.sort((a,b) => a.f - b.f); const current = open.shift(); const currKey = toKey(current.x, current.z);
+        
+        if(current.x === gxEnd && current.z === gzEnd) {
+            const path = []; let curr = currKey;
+            while(cameFrom.has(curr)) {
+                const [px, pz] = curr.split(',').map(Number);
+                path.unshift({x: px - CONFIG.GRID_SIZE/2 + 0.5, z: pz - CONFIG.GRID_SIZE/2 + 0.5});
+                curr = cameFrom.get(curr);
+            }
+            state.pathCache.set(cacheKey, path); return path;
+        }
+        
+        closed.add(currKey);
+        const dirs = [[0,1],[1,0],[0,-1],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+        for(let d of dirs) {
+            const nx = current.x + d[0]; const nz = current.z + d[1];
+            if(nx < 0 || nx >= CONFIG.GRID_SIZE || nz < 0 || nz >= CONFIG.GRID_SIZE || grid[nz * CONFIG.GRID_SIZE + nx] === 1) continue;
+            
+            const nKey = toKey(nx, nz); if(closed.has(nKey)) continue;
+            const tentG = gScore.get(currKey) + (d[0] && d[1] ? 1.414 : 1);
+            
+            if(!gScore.has(nKey) || tentG < gScore.get(nKey)) {
+                cameFrom.set(nKey, currKey); gScore.set(nKey, tentG);
+                open.push({x: nx, z: nz, f: tentG + Math.abs(nx - gxEnd) + Math.abs(nz - gzEnd)});
+            }
+        }
+        iters++;
+    }
+    state.pathCache.set(cacheKey, []); return [];
+}
+
+function createDefaultEscalators() {
+    if(state.escalators.length === 0 && state.elevators.length === 0) {
+        createEscalator(10, -10, 1); 
+        createEscalator(10, 0, 2);   
+        createEscalator(10, 10, 3);  
+        createElevator(-10, 0, 0, 10, 15, 2.0); 
+    }
+}
+
+function toggleSim() {
+    if (state.sim.time >= CONFIG.SIM_END) return;
+
+    state.sim.running = !state.sim.running;
+    const btn = document.getElementById('btnPlayPause');
+    if(state.sim.running) {
+        btn.innerText = '⏸ 暂停'; btn.classList.add('active');
+        clearSelection();
+    } else { 
+        btn.innerText = '▶ 继续'; btn.classList.remove('active'); 
+    }
+}
+
+function calcEscMetrics() {
+    const recent5Min = state.sim.time - 300;
+    state.sim.completedLog = state.sim.completedLog.filter(t => t >= recent5Min);
+    state.sim.completedElevLog = state.sim.completedElevLog.filter(t => t >= recent5Min);
+    
+    // Escalators
+    const onEsc = state.sim.agents.filter(a => a.state === 'ON_ESC').length;
+    state.escMetrics.epsilon = state.escalators.length > 0 ? (onEsc / (state.escalators.length * 15)) * 100 : 0;
+    state.escMetrics.ce5 = state.escalators.length > 0 ? Math.min((state.sim.completedLog.length / (state.escalators.length * 150)) * 100, 100) : 0;
+    
+    // Elevators
+    let totalPass = 0, totalCap = 0;
+    state.elevators.forEach(e => { totalPass += e.passengers.length; totalCap += e.capacity; });
+    state.elevMetrics.epsilon = totalCap > 0 ? (totalPass / totalCap) * 100 : 0;
+    state.elevMetrics.ce5 = state.elevators.length > 0 ? Math.min((state.sim.completedElevLog.length / (state.elevators.length * 100)) * 100, 100) : 0;
+}
+
+function updateSimulation(dtReal) {
+    if (state.sim.running && state.sim.time >= CONFIG.SIM_END) {
+        state.sim.time = CONFIG.SIM_END;
+        state.sim.running = false;
+        const btn = document.getElementById('btnPlayPause');
+        btn.innerText = '已达 12:00';
+        btn.classList.remove('active');
+        
+        document.getElementById('clock').innerText = getSimDateTimeString(CONFIG.SIM_END);
+        updateMetrics(); 
+        return;
+    }
+    if(!state.sim.running) return;
+    
+    dtReal = Math.min(dtReal, 0.05);
+    const dtSim = dtReal * state.sim.speed; state.sim.time += dtSim;
+
+    const dispTime = Math.min(state.sim.time, CONFIG.SIM_END);
+    document.getElementById('clock').innerText = getSimDateTimeString(dispTime);
+
+    const currentLambdaSec = getLambdaAtTime(state.sim.time) / 3600;
+    state.sim.arrivalAcc += currentLambdaSec * dtSim;
+
+    while(state.sim.arrivalAcc >= state.sim.nextThreshold && state.sim.agents.length < CONFIG.MAX_AGENTS) {
+        const bulkProb = state.agentConfig.bulkProb || 0.05;
+        if (Math.random() < bulkProb) {
+            const bulkSize = Math.floor(Math.random() * 20) + 10;
+            for(let b=0; b<bulkSize; b++) spawnAgent(true);
+        } else {
+            spawnAgent(false);
+        }
+        state.sim.arrivalAcc -= state.sim.nextThreshold;
+        state.sim.nextThreshold = -Math.log(1 - Math.random());
+    }
+
+    const tmpVec = new THREE.Vector3();
+    const MAX_ON_ESC = Math.floor(CONFIG.ESC_CAPACITY * CONFIG.EPSILON_CAP);
+
+    for(let i = state.sim.agents.length - 1; i >= 0; i--) {
+        const a = state.sim.agents[i];
+        
+        if (a.state === 'WALKING') {
+            if(!a.path || a.pathIndex >= a.path.length) {
+                a.path = calculatePathAStar(a.x, a.z, a.targetX, a.targetZ, a.currentFloor); a.pathIndex = 0;
+                if(a.path.length === 0) { a.x = a.targetX; a.z = a.targetZ; }
+            }
+
+            if(a.pathIndex < a.path.length) {
+                const next = a.path[a.pathIndex];
+                const dx = next.x - a.x; const dz = next.z - a.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist < 0.15) { a.pathIndex++; } else { a.x += (dx / dist) * a.speed * dtSim; a.z += (dz / dist) * a.speed * dtSim; }
+            }
+
+            if (Math.hypot(a.x - a.targetX, a.z - a.targetZ) < 0.5) {
+                if (a.nextState === 'DEST') {
+                    state.sim.completed++; 
+                    const floorName = CONFIG.FLOORS[a.targetFloor];
+                    state.sim.sankeyData[floorName] = (state.sim.sankeyData[floorName] || 0) + 1;
+                    state.sim.agents.splice(i, 1); 
+                    continue;
+                } else if (a.nextState === 'ESC') {
+                    a.state = 'QUEUEING_ESC'; a.queueTime = state.sim.time;
+                    const queue = a.isUp ? a.transRef.up.queue : a.transRef.down.queue;
+                    queue.push(a); state.sim.metrics.Lmax = Math.max(state.sim.metrics.Lmax, queue.length);
+                } else if (a.nextState === 'ELEV') {
+                    a.state = 'QUEUEING_ELEV'; a.queueTime = state.sim.time;
+                    a.transRef.queues[a.currentFloor].push(a);
+                }
+            }
+        }
+        else if (a.state === 'QUEUEING_ESC') {
+            const queueObj = a.isUp ? a.transRef.up : a.transRef.down;
+            const qIndex = queueObj.queue.indexOf(a);
+            if (qIndex > -1) {
+                queueObj.entry.getWorldPosition(tmpVec);
+                const targetQz = tmpVec.z + queueObj.queueDirZ * (qIndex * CONFIG.QUEUE_SPACING);
+                const dx = tmpVec.x - a.x; const dz = targetQz - a.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist > 0.2) {
+                    a.x += (dx / dist) * a.speed * dtSim;
+                    a.z += (dz / dist) * a.speed * dtSim;
+                }
+            }
+        }
+        else if (a.state === 'QUEUEING_ELEV') {
+            const qIndex = a.transRef.queues[a.currentFloor].indexOf(a);
+            if(qIndex > -1) {
+                const targetX = a.transRef.x + (qIndex%3)*0.6 - 0.6;
+                const targetZ = a.transRef.z + 2.5 + Math.floor(qIndex/3)*0.6;
+                const dx = targetX - a.x; const dz = targetZ - a.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist > 0.2) {
+                    a.x += (dx / dist) * a.speed * dtSim;
+                    a.z += (dz / dist) * a.speed * dtSim;
+                }
+            }
+        }
+        else if (a.state === 'ON_ESC') {
+            const slantSpeed = Math.hypot(CONFIG.ESC_SPEED_H, CONFIG.ESC_SPEED_V);
+            const escLength = Math.hypot(12, CONFIG.FLOOR_H); 
+            a.progress += (slantSpeed / escLength) * dtSim;
+            
+            if(a.progress >= 1) {
+                state.sim.completedLog.push(state.sim.time); 
+                a.currentFloor = a.isUp ? a.transRef.fTo : a.transRef.fFrom;
+                a.state = 'WALKING'; a.nextState = 'DEST';
+                a.targetX = (Math.random() - 0.5) * 70; a.targetZ = (Math.random() - 0.5) * 70; a.path = null;
+            } else {
+                const start = a.isUp ? a.transRef.up.entry : a.transRef.down.entry;
+                const end = a.isUp ? a.transRef.up.exit : a.transRef.down.exit;
+                start.getWorldPosition(tmpVec); const s = tmpVec.clone();
+                end.getWorldPosition(tmpVec); const e = tmpVec.clone();
+                a.x = s.x + (e.x - s.x) * a.progress; a.y = s.y + (e.y - s.y) * a.progress; a.z = s.z + (e.z - s.z) * a.progress;
+            }
+        }
+    }
+
+    const baseSlantSpeed = Math.hypot(0.5, 0.25);
+    const currentSlantSpeed = Math.hypot(CONFIG.ESC_SPEED_H, CONFIG.ESC_SPEED_V);
+    const releaseRate = (currentSlantSpeed / baseSlantSpeed) * 3.0 * dtSim;
+
+    state.escalators.forEach(esc => {
+        let currentUp = state.sim.agents.filter(a => a.state === 'ON_ESC' && a.transRef === esc && a.isUp).length;
+        let currentDown = state.sim.agents.filter(a => a.state === 'ON_ESC' && a.transRef === esc && !a.isUp).length;
+
+        esc.up.acc += releaseRate;
+        while(esc.up.acc >= 1 && esc.up.queue.length > 0 && currentUp < MAX_ON_ESC) {
+            const a = esc.up.queue.shift(); const wait = state.sim.time - a.queueTime;
+            state.sim.metrics.escWqSum += wait; state.sim.metrics.escWqCount++; 
+            state.sim.metrics.cycleWqMax = Math.max(state.sim.metrics.cycleWqMax, wait);
+            a.state = 'ON_ESC'; a.progress = 0; esc.up.acc--; currentUp++;
+        }
+        
+        esc.down.acc += releaseRate;
+        while(esc.down.acc >= 1 && esc.down.queue.length > 0 && currentDown < MAX_ON_ESC) {
+            const a = esc.down.queue.shift(); const wait = state.sim.time - a.queueTime;
+            state.sim.metrics.escWqSum += wait; state.sim.metrics.escWqCount++; 
+            state.sim.metrics.cycleWqMax = Math.max(state.sim.metrics.cycleWqMax, wait);
+            a.state = 'ON_ESC'; a.progress = 0; esc.down.acc--; currentDown++;
+        }
+    });
+
+    state.elevators.forEach(el => {
+        if (el.state === 'IDLE') {
+            let calls = [];
+            for(let f = el.fMin; f <= el.fMax; f++) if(el.queues[f].length > 0) calls.push(f);
+            
+            if (calls.length > 0) {
+                el.targetFloor = calls.reduce((a, b) => Math.abs(b - el.currentFloor) < Math.abs(a - el.currentFloor) ? b : a);
+                el.state = el.targetFloor === el.currentFloor ? 'DOORS_OPEN' : 'MOVING';
+                el.direction = Math.sign(el.targetFloor - el.currentFloor) || 1;
+                el.timer = el.state === 'DOORS_OPEN' ? 3.0 : 0;
+            }
+        } else if (el.state === 'MOVING') {
+            const targetY = el.targetFloor * CONFIG.FLOOR_H + 2;
+            const dir = Math.sign(targetY - el.cabinMesh.position.y);
+            el.cabinMesh.position.y += dir * el.speed * dtSim;
+            
+            if (Math.abs(el.cabinMesh.position.y - targetY) < Math.max(0.1, el.speed * dtSim)) {
+                el.cabinMesh.position.y = targetY;
+                el.currentFloor = el.targetFloor;
+                el.state = 'DOORS_OPEN';
+                el.timer = 3.0; 
+            }
+        } else if (el.state === 'DOORS_OPEN') {
+            el.timer -= dtSim;
+            
+            for(let i = el.passengers.length - 1; i >= 0; i--) {
+                const p = el.passengers[i];
+                if (p.targetFloor === el.currentFloor) {
+                    el.passengers.splice(i, 1);
+                    state.sim.completedElevLog.push(state.sim.time);
+                    p.currentFloor = el.currentFloor;
+                    p.state = 'WALKING';
+                    p.nextState = 'DEST';
+                    p.x = el.x + (Math.random()-0.5)*2;
+                    p.z = el.z + (Math.random()-0.5)*2 + 2; 
+                    p.y = el.currentFloor * CONFIG.FLOOR_H;
+                    p.targetX = (Math.random() - 0.5) * 70;
+                    p.targetZ = (Math.random() - 0.5) * 70;
+                    p.path = null;
+                }
+            }
+            
+            while(el.passengers.length < el.capacity && el.queues[el.currentFloor].length > 0) {
+                const p = el.queues[el.currentFloor].shift();
+                el.passengers.push(p);
+                p.state = 'ON_ELEV';
+                const wait = state.sim.time - p.queueTime;
+                state.sim.metrics.elevWqSum += wait; state.sim.metrics.elevWqCount++;
+                state.sim.metrics.cycleWqMax = Math.max(state.sim.metrics.cycleWqMax, wait);
+            }
+            
+            el.passengers.forEach(p => {
+                p.x = el.x + (Math.random()-0.5)*1.5;
+                p.z = el.z + (Math.random()-0.5)*1.5;
+            });
+
+            if (el.timer <= 0) {
+                const pTargets = el.passengers.map(p => p.targetFloor);
+                const qCalls = [];
+                for(let f = el.fMin; f <= el.fMax; f++) if(el.queues[f].length > 0) qCalls.push(f);
+                
+                const allCalls = [...new Set([...pTargets, ...qCalls])];
+                if (allCalls.length === 0) {
+                    el.state = 'IDLE';
+                } else {
+                    let callsAhead = allCalls.filter(f => el.direction > 0 ? f > el.currentFloor : f < el.currentFloor);
+                    if (callsAhead.length > 0) {
+                        el.targetFloor = el.direction > 0 ? Math.min(...callsAhead) : Math.max(...callsAhead);
+                    } else {
+                        el.direction *= -1;
+                        callsAhead = allCalls.filter(f => el.direction > 0 ? f > el.currentFloor : f < el.currentFloor);
+                        if (callsAhead.length > 0) {
+                            el.targetFloor = el.direction > 0 ? Math.min(...callsAhead) : Math.max(...callsAhead);
+                        } else {
+                            el.state = 'IDLE';
+                        }
+                    }
+                    if (el.state !== 'IDLE') el.state = 'MOVING';
+                }
+            }
+        }
+        
+        if (el.state === 'MOVING' || el.state === 'DOORS_OPEN') {
+            el.passengers.forEach(p => { p.y = el.cabinMesh.position.y - 2; });
+        }
+    });
+
+    calcEscMetrics(); updateMetrics(); updateHeatmaps();
+}
+
+function spawnAgent(isBulk) {
+    let startFloor, sx, sz;
+    if (state.spawnPoints.length > 0) {
+        const sp = state.spawnPoints[Math.floor(Math.random() * state.spawnPoints.length)];
+        startFloor = sp.floor; 
+        const dispersion = isBulk ? 5 : 2;
+        sx = sp.x + (Math.random() - 0.5) * dispersion; 
+        sz = sp.z + (Math.random() - 0.5) * dispersion;
+    } else {
+        startFloor = Math.random() < 0.2 ? 1 : 2; 
+        sx = (Math.random() - 0.5) * 40; sz = (Math.random() - 0.5) * 40;
+    }
+
+    const weights = [...state.agentConfig.destWeights];
+    const totalW = weights.reduce((a, b) => a + b, 0);
+
+    let targetFloor = 1;
+    if (totalW > 0) {
+        let r = Math.random() * totalW;
+        for (let i = 0; i < weights.length; i++) {
+            if (weights[i] > 0) {
+                r -= weights[i];
+                if (r <= 0) {
+                    targetFloor = i;
+                    break;
+                }
+            }
+        }
+    } else {
+        targetFloor = (startFloor + 1) % CONFIG.FLOORS.length;
+    }
+
+    let pos, transRef = null, nextState = 'DEST';
+    let isUp = false;
+
+    if (targetFloor !== startFloor) {
+        isUp = targetFloor > startFloor;
+        const diff = Math.abs(targetFloor - startFloor);
+        const escOptions = [];
+        const elevOptions = [];
+        
+        if(diff === 1) {
+            const validEscs = state.escalators.filter(e => isUp ? e.fFrom === startFloor && e.fTo === targetFloor : e.fTo === startFloor && e.fFrom === targetFloor);
+            validEscs.forEach(e => escOptions.push({ type: 'ESC', ref: e }));
+        }
+        
+        const validElevs = state.elevators.filter(e => startFloor >= e.fMin && startFloor <= e.fMax && targetFloor >= e.fMin && targetFloor <= e.fMax);
+        validElevs.forEach(e => elevOptions.push({ type: 'ELEV', ref: e }));
+
+        if(escOptions.length === 0 && elevOptions.length === 0) return; 
+        
+        let choice;
+        if(escOptions.length > 0 && elevOptions.length > 0) {
+            choice = Math.random() < state.agentConfig.elevPref 
+                ? elevOptions[Math.floor(Math.random() * elevOptions.length)]
+                : escOptions[Math.floor(Math.random() * escOptions.length)];
+        } else if (elevOptions.length > 0) {
+            choice = elevOptions[Math.floor(Math.random() * elevOptions.length)];
+        } else {
+            choice = escOptions[Math.floor(Math.random() * escOptions.length)];
+        }
+        
+        transRef = choice.ref;
+        nextState = choice.type;
+
+        if(choice.type === 'ESC') {
+            const entry = isUp ? transRef.up.entry : transRef.down.entry;
+            pos = new THREE.Vector3(); entry.getWorldPosition(pos);
+        } else {
+            pos = new THREE.Vector3(transRef.x, startFloor * CONFIG.FLOOR_H, transRef.z + 2.5);
+        }
+    } else {
+        pos = new THREE.Vector3((Math.random() - 0.5) * 70, startFloor * CONFIG.FLOOR_H, (Math.random() - 0.5) * 70);
+    }
+
+    const isPatient = Math.random() < state.agentConfig.patientRatio;
+    const agentSpeed = isPatient ? state.agentConfig.patientSpeed : state.agentConfig.adultSpeed;
+    const agentColor = isPatient ? new THREE.Color(0xef4444) : new THREE.Color(0x10b981); 
+
+    state.sim.agents.push({
+        id: Math.random(), startFloor, currentFloor: startFloor, targetFloor, state: 'WALKING', nextState: nextState,
+        x: sx, y: startFloor * CONFIG.FLOOR_H, z: sz,
+        targetX: pos.x, targetZ: pos.z,
+        isUp, transRef, path: null, pathIndex: 0,
+        speed: agentSpeed, color: agentColor
+    });
+}
+
+function updateHeatmaps() {
+    if (!state.showHeatmap) {
+        heatmapCtxs.forEach((ctx, fl) => {
+            ctx.clearRect(0,0,CONFIG.GRID_SIZE, CONFIG.GRID_SIZE);
+            heatmapTextures[fl].needsUpdate = true;
+        });
+        return;
+    }
+    
+    heatmapCtxs.forEach(ctx => ctx.clearRect(0,0,CONFIG.GRID_SIZE, CONFIG.GRID_SIZE));
+    const grids = Array(CONFIG.FLOORS.length).fill(null).map(() => new Uint16Array(CONFIG.GRID_SIZE * CONFIG.GRID_SIZE));
+    const offset = CONFIG.GRID_SIZE / 2;
+
+    state.sim.agents.forEach(a => {
+        if(a.state === 'ON_ESC' || a.state === 'ON_ELEV') return;
+        const fl = a.currentFloor; const gx = Math.floor(a.x + offset); const gz = Math.floor(a.z + offset);
+        if(gx>=0 && gx<CONFIG.GRID_SIZE && gz>=0 && gz<CONFIG.GRID_SIZE) grids[fl][gz * CONFIG.GRID_SIZE + gx] = Math.min(grids[fl][gz * CONFIG.GRID_SIZE + gx] + 1, 4);
+    });
+
+    heatmapCtxs.forEach((ctx, fl) => {
+        const id = ctx.createImageData(CONFIG.GRID_SIZE, CONFIG.GRID_SIZE); const data = id.data;
+        for(let i=0; i<grids[fl].length; i++) {
+            const c = grids[fl][i];
+            const idx = i*4;
+            if(c > 0) {
+                data[idx] = c===1 ? 0 : 255; 
+                data[idx+1] = c===1 ? 255 : c===2 ? 255 : 0; 
+                data[idx+2] = 0; 
+                data[idx+3] = 255; 
+            } else {
+                data[idx+3] = 0; 
+            }
+        }
+        ctx.putImageData(id, 0, 0); heatmapTextures[fl].needsUpdate = true;
+    });
+}
+
+function updateMetrics() {
+    const m = state.sim.metrics;
+    const avgWqEsc = m.escWqCount ? (m.escWqSum / m.escWqCount).toFixed(1) : 0;
+    const avgWqElev = m.elevWqCount ? (m.elevWqSum / m.elevWqCount).toFixed(1) : 0;
+    
+    document.getElementById('metricCa').innerText = state.sim.completed; document.getElementById('metricLmax').innerText = m.Lmax;
+    document.getElementById('metricWqEsc').innerHTML = `${avgWqEsc}<span>s</span>`;
+    document.getElementById('metricWqEl').innerHTML = `${avgWqElev}<span>s</span>`;
+
+    let totalQueue = 0; 
+    state.escalators.forEach(e => totalQueue += e.up.queue.length + e.down.queue.length);
+    state.elevators.forEach(el => el.queues.forEach(q => totalQueue += q.length));
+    
+    if (state.sim.time - (window.lastChart || 0) >= 30) {
+        window.lastChart = state.sim.time;
+        const timeStr = getSimDateTimeString(Math.min(state.sim.time, CONFIG.SIM_END));
+        const xAxisTime = timeStr.substring(11, 16);
+        
+        state.sim.queueLog.push([xAxisTime, totalQueue]);
+        m.cycleWqMax = 0;
+        
+        charts.queue.setOption({
+            xAxis: { data: state.sim.queueLog.map(d => d[0]) },
+            series: [{ data: state.sim.queueLog.map(d => d[1]) }] 
+        });
+        
+        state.escMetrics.history.push([xAxisTime, state.escMetrics.ce5.toFixed(1), state.escMetrics.epsilon.toFixed(1)]);
+        state.elevMetrics.history.push([xAxisTime, state.elevMetrics.ce5.toFixed(1), state.elevMetrics.epsilon.toFixed(1)]);
+
+        updateSankey(); updateEscMetricsCharts();
+    }
+}
+
+function updateSankey() {
+    const nodes = [{name:'到达客流总计'}];
+    CONFIG.FLOORS.forEach(f => nodes.push({name: f + '层'}));
+    const links = []; const d = state.sim.sankeyData;
+    
+    CONFIG.FLOORS.forEach((f, i) => {
+        if(d[f]) links.push({source: 0, target: i + 1, value: d[f]});
+    });
+
+    if(links.length === 0) return;
+    charts.sankey.setOption({ tooltip: { trigger: 'item' }, series: { type: 'sankey', data: nodes, links: links, lineStyle: { color: 'gradient' }, label: { color: '#fff', fontSize: 11 } } });
+}
+
+function updateHTMLMeasurements() {
+    const layer = document.getElementById('measurements-layer'); layer.innerHTML = ''; const tempV = new THREE.Vector3();
+    state.measurements.forEach(m => {
+        tempV.copy(m.center); tempV.project(camera); 
+        if(tempV.z < 1) { 
+            const el = document.createElement('div'); el.className = 'measure-label'; el.innerText = m.text;
+            el.style.left = `${(tempV.x * .5 + .5) * window.innerWidth}px`; el.style.top = `${(tempV.y * -.5 + .5) * window.innerHeight}px`; layer.appendChild(el);
+        }
+    });
+}
+
+function updateScaleBarUI() {
+    const dist = camera.position.distanceTo(controls.target);
+    const heightAtTarget = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist; 
+    document.getElementById('scale-bar-text').innerText = `${(100 * (heightAtTarget / window.innerHeight)).toFixed(1)} m`;
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now(); const dt = Math.min((now - (window.lastTime || now)) / 1000, 0.05); window.lastTime = now;
+
+    if(state.sim.running) updateSimulation(dt);
+
+    agentInstancedMesh.count = state.sim.agents.length;
+    state.sim.agents.forEach((a, i) => {
+        dummy.position.set(a.x, a.y + 0.8, a.z); dummy.updateMatrix();
+        agentInstancedMesh.setMatrixAt(i, dummy.matrix); agentInstancedMesh.setColorAt(i, a.color);
+    });
+    if(agentInstancedMesh.count) { agentInstancedMesh.instanceMatrix.needsUpdate = true; agentInstancedMesh.instanceColor.needsUpdate = true; }
+
+    controls.update(); renderer.render(scene, camera);
+    updateHTMLMeasurements(); updateScaleBarUI();
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+    charts.queue.resize(); charts.sankey.resize(); 
+    if(charts.escCE5) charts.escCE5.resize(); if(charts.escEps) charts.escEps.resize();
+    if(charts.elCE5) charts.elCE5.resize(); if(charts.elEps) charts.elEps.resize();
+    if(charts.escCE5Trend) charts.escCE5Trend.resize(); if(charts.escEpsTrend) charts.escEpsTrend.resize();
+    if(charts.elCE5Trend) charts.elCE5Trend.resize(); if(charts.elEpsTrend) charts.elEpsTrend.resize();
+}
+
+function applyTheme() {
+    const isDark = document.documentElement.classList.contains('dark');
+    const textColor = isDark ? '#94a3b8' : '#64748b';
+    const splitColor = isDark ? '#334155' : '#cbd5e1';
+    
+    const updateEchartTheme = (chart) => {
+        if (!chart) return;
+        const opt = chart.getOption();
+        if(opt.xAxis && opt.xAxis.length) opt.xAxis[0].axisLabel.color = textColor;
+        if(opt.yAxis && opt.yAxis.length) {
+            opt.yAxis.forEach(y => {
+                if(y.axisLabel) y.axisLabel.color = textColor;
+                if(y.splitLine && y.splitLine.lineStyle) y.splitLine.lineStyle.color = splitColor;
+            });
+        }
+        if(opt.legend && opt.legend.length) opt.legend[0].textStyle.color = textColor;
+        if(opt.series) opt.series.forEach(s => {
+            if(s.type === 'gauge' && s.title) s.title.color = textColor;
+            if(s.type === 'gauge' && s.detail) s.detail.color = isDark ? '#ffffff' : '#1e293b';
+        });
+        chart.setOption(opt);
+    };
+
+    updateEchartTheme(charts.queue); 
+    updateEchartTheme(charts.escCE5Trend); updateEchartTheme(charts.escEpsTrend);
+    updateEchartTheme(charts.elCE5Trend); updateEchartTheme(charts.elEpsTrend);
+    updateEchartTheme(charts.escCE5); updateEchartTheme(charts.escEps);
+    updateEchartTheme(charts.elCE5); updateEchartTheme(charts.elEps);
+    
+    if(charts.sankey) charts.sankey.setOption({ series: { label: { color: isDark ? '#ffffff' : '#1e293b' } } });
+
+    if (scene && renderer) {
+        const bgColor = isDark ? 0x0f172a : 0xf8fafc;
+        scene.fog.color.setHex(bgColor);
+        renderer.setClearColor(bgColor, 1);
+        
+        CONFIG.FLOORS.forEach((name, i) => {
+            const p = floorMeshes[i];
+            if (p && p.userData.grid) {
+                scene.remove(p.userData.grid);
+                const grid = new THREE.GridHelper(CONFIG.GRID_SIZE, CONFIG.GRID_SIZE, isDark ? 0x334155 : 0x94a3b8, isDark ? 0x1e293b : 0xe2e8f0);
+                grid.position.y = i * CONFIG.FLOOR_H + 0.01;
+                grid.visible = state.floorVisibility[i];
+                scene.add(grid); p.userData.grid = grid;
+            }
+        });
+    }
+}
+
+function toggleTheme() {
+    const html = document.documentElement;
+    if (html.classList.contains('dark')) { html.classList.remove('dark'); localStorage.theme = 'light'; } 
+    else { html.classList.add('dark'); localStorage.theme = 'dark'; }
+    applyTheme();
+}
+
+function initThemeSettings() {
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+    } else { document.documentElement.classList.remove('dark'); }
+    
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+        if (!('theme' in localStorage)) {
+            if (e.matches) document.documentElement.classList.add('dark'); else document.documentElement.classList.remove('dark');
+            applyTheme();
+        }
+    });
+}
+
+initThemeSettings();
+initThree(); initUI(); initCharts(); initEscMetricsCharts(); 
+createDefaultEscalators();
+window.lastTime = performance.now(); applyTheme(); animate();
+</script>
+</body>
+</html>
